@@ -129,11 +129,20 @@ func examples() []example {
 	e6Labels["Rules.clusters.Missing.login.scope.group"] = "operators"
 
 	const (
-		scopesDefault = `[{"name": "reports.read", "group": "default"}, {"name": "reports.write", "group": "default"}]`
-		scopesWriters = `[{"name": "reports.read", "group": "writers"}, {"name": "reports.write", "group": "writers"}]`
-		scopesReaders = `[{"name": "admin", "group": "readers"}, {"name": "auditor", "group": "readers"}]`
-		operatorScope = `[{"name": "admin.cluster", "group": "operators"}]`
-		loginDefault  = `{"action": "login", "scope": {"group": "default", "requireOtherGroupMembers": true}}`
+		scopesDefault    = `[{"name": "reports.read", "group": "default"}, {"name": "reports.write", "group": "default"}]`
+		scopesWriters    = `[{"name": "reports.read", "group": "writers"}, {"name": "reports.write", "group": "writers"}]`
+		scopesReaders    = `[{"name": "admin", "group": "readers"}, {"name": "auditor", "group": "readers"}]`
+		operatorScope    = `[{"name": "admin.cluster", "group": "operators"}]`
+		loginDefault     = `{"action": "login", "scope": {"group": "default", "requireOtherGroupMembers": true}}`
+		publicWithScopes = `{
+  "groups": {"default": {"scopes": ["graphql.openapi", "graphql.openapi.user"], "requireAllScopesForAnyMember": true}},
+  "rules": [
+    {"name": "app", "priority": 3, "paths": ["/**"], "methods": [], "public": true,
+     "scopes": [{"name": "graphql.openapi", "group": "default"}, {"name": "graphql.openapi.user", "group": "default"}],
+     "any": [],
+     "missing": {"action": "login", "scope": {"group": "default", "requireOtherGroupMembers": true}}}
+  ]
+}`
 	)
 
 	return []example{
@@ -366,6 +375,48 @@ func examples() []example {
 			want: map[string]string{"rules.0.missing": `{"action": "deny"}`},
 		},
 		{
+			name: "E7 a public rule that names scopes",
+			forms: []form{
+				labels("", lbl{"Rules.app.Public": "true", "Rules.app.Scopes": "graphql.openapi graphql.openapi.user"}),
+				cluster("", obj{"Rules": obj{"app": obj{"Public": true, "Scopes": "graphql.openapi graphql.openapi.user"}}}),
+			},
+			want: map[string]string{"": publicWithScopes},
+		},
+		{
+			name: "E7 a public rule's login, written",
+			forms: []form{
+				labels("a value", lbl{"Rules.app.Public": "true", "Rules.app.Scopes": "admin", "Rules.app.Missing": "login"}),
+				cluster("a value", obj{"Rules": obj{"app": obj{"Public": true, "Scopes": "admin", "Missing": "login"}}}),
+			},
+			want: map[string]string{"rules.0.public": `true`, "rules.0.missing": loginDefault},
+		},
+		{
+			name: "E7 a public rule's login that names its group",
+			forms: []form{
+				labels("", severalGroups(lbl{
+					"Rules.page.Public": "true", "Rules.page.Scopes.admin.group": "operators",
+					"Rules.page.Missing.login.scope.group": "operators", "Rules.page.Missing.login.scope.requireOtherGroupMembers": "false",
+				})),
+				cluster("", severalGroupsCluster(obj{"page": obj{
+					"Public": true, "Scopes": obj{"admin": obj{"group": "operators"}},
+					"Missing": obj{"login": obj{"scope": obj{"group": "operators", "requireOtherGroupMembers": false}}},
+				}})),
+			},
+			want: map[string]string{
+				"rules.0.public":  `true`,
+				"rules.0.scopes":  `[{"name": "admin", "group": "operators"}]`,
+				"rules.0.missing": `{"action": "login", "scope": {"group": "operators", "requireOtherGroupMembers": false}}`,
+			},
+		},
+		{
+			name: "E7 a public rule without scopes refuses nobody, and fetches nothing",
+			forms: []form{
+				labels("", lbl{"Rules.page.Public": "true"}),
+				cluster("", obj{"Rules": obj{"page": obj{"Public": true}}}),
+			},
+			want: map[string]string{"groups": `{}`, "rules.0.scopes": `[]`, "rules.0.missing": `{"action": "deny"}`},
+		},
+		{
 			name: "E6 two groups",
 			forms: []form{
 				labels("", twoGroupsLabels()),
@@ -451,10 +502,35 @@ func refusals() []example {
 			},
 		},
 		{
+			name: `Rules.page.Missing: a public rule refuses nobody (login, or not written)`,
+			forms: []form{
+				labels("", lbl{"Rules.page.Public": "true", "Rules.page.Missing": "deny"}),
+				cluster("", obj{"Rules": obj{"page": obj{"Public": true, "Missing": "deny"}}}),
+				labels("with scopes", lbl{"Rules.page.Public": "true", "Rules.page.Scopes": "admin", "Rules.page.Missing": "deny"}),
+				cluster("a key", obj{"Rules": obj{"page": obj{"Public": true, "Missing": obj{"deny": true}}}}),
+			},
+		},
+		{
 			name: `Rules.page: a public rule has no scopes`,
 			forms: []form{
-				labels("", lbl{"Rules.page.Public": "true", "Rules.page.Scopes": "admin"}),
-				cluster("", obj{"Rules": obj{"page": obj{"Public": true, "Scopes": "admin"}}}),
+				labels("", lbl{"Rules.page.Public": "true", "Rules.page.Any": "admin"}),
+				cluster("", obj{"Rules": obj{"page": obj{"Public": true, "Any": "admin"}}}),
+				cluster("with Scopes", obj{"Rules": obj{"page": obj{"Public": true, "Scopes": "admin", "Any": "auditor"}}}),
+			},
+		},
+		{
+			// The login of a public rule that names scopes has no group of its own where there are several.
+			name: `Rules.page.Missing: a login names its scope.group where there are several groups (operators, users)`,
+			forms: []form{
+				labels("", severalGroups(lbl{"Rules.page.Public": "true", "Rules.page.Scopes.admin.group": "operators"})),
+				cluster("", severalGroupsCluster(obj{"page": obj{"Public": true, "Scopes": obj{"admin": obj{"group": "operators"}}}})),
+			},
+		},
+		{
+			name: `Rules.page.Scopes: a scope names its group where there are several groups (operators, users)`,
+			forms: []form{
+				labels("a public rule", severalGroups(lbl{"Rules.page.Public": "true", "Rules.page.Scopes": "admin"})),
+				cluster("a public rule", severalGroupsCluster(obj{"page": obj{"Public": true, "Scopes": "admin"}})),
 			},
 		},
 		{
