@@ -622,3 +622,73 @@ func at(tree any, path string) (any, bool) {
 	}
 	return tree, true
 }
+
+// A boolean is read as Traefik reads a label's (strconv.ParseBool), wherever the policy's settings have one:
+// Public, an entry's bare true, a group's RequireAllScopesForAnyMember, a login's scope.requireOtherGroupMembers.
+func TestBooleans(t *testing.T) {
+	type spelling struct {
+		label   string
+		cluster any
+	}
+	trues := []spelling{{"1", 1}, {"t", "t"}, {"T", "T"}, {"true", true}, {"True", "True"}, {"TRUE", "TRUE"}}
+	falses := []spelling{{"0", 0}, {"f", "f"}, {"F", "F"}, {"false", false}, {"False", "False"}, {"FALSE", "FALSE"}}
+	refused := []spelling{{"yes", "yes"}, {"on", "on"}, {"tRuE", "tRuE"}, {"", ""}}
+
+	public := func(v any) obj { return obj{"Rules.assets.Public": v} }
+	publicAt := "rules.0.public"
+	group := func(v any) obj {
+		return obj{"Groups.operators.RequireAllScopesForAnyMember": v, "Groups.operators.Scopes": "admin"}
+	}
+	groupAt := "groups.operators.requireAllScopesForAnyMember"
+	login := func(v any) obj {
+		return obj{"Scopes": "admin", "Missing.login.scope.requireOtherGroupMembers": v}
+	}
+	loginAt := "rules.0.missing.scope.requireOtherGroupMembers"
+
+	value := func(name string, in obj, path string, want bool) {
+		got, err := Normalize(in)
+		if err != nil {
+			t.Errorf("%s: refused: %v", name, err)
+			return
+		}
+		part, _ := at(decode(t, name, encode(t, got)), path)
+		if part != want {
+			t.Errorf("%s: %s is %v and should be %v", name, path, part, want)
+		}
+	}
+	for _, both := range []struct {
+		spellings []spelling
+		want      bool
+	}{{trues, true}, {falses, false}} {
+		for _, s := range both.spellings {
+			for form, v := range map[string]any{"label": s.label, "cluster": s.cluster} {
+				name := form + " " + strconv.Quote(s.label)
+				value(name, public(v), publicAt, both.want)
+				value(name, group(v), groupAt, both.want)
+				value(name, login(v), loginAt, both.want)
+			}
+		}
+	}
+	for _, s := range trues {
+		for form, v := range map[string]any{"label": s.label, "cluster": s.cluster} {
+			name := form + " " + strconv.Quote(s.label) + ", an entry"
+			value(name, obj{"Scopes.admin": v, "Missing.login": v}, "rules.0.missing.scope.requireOtherGroupMembers", true)
+		}
+	}
+	for _, s := range refused {
+		for key, in := range map[string]obj{
+			"Rules.assets.Public":                           public(s.label),
+			"Groups.operators.RequireAllScopesForAnyMember": group(s.label),
+			"Missing.login.scope.requireOtherGroupMembers":  login(s.label),
+		} {
+			want := key + `: ` + strconv.Quote(s.label) + ` is neither true nor false`
+			if _, err := Normalize(in); err == nil || err.Error() != want {
+				t.Errorf("%v, and should be refused with\n%s", err, want)
+			}
+		}
+		want := `Scopes.admin: ` + strconv.Quote(s.label) + ` is neither true nor fields (a scope has name, group)`
+		if _, err := Normalize(obj{"Scopes.admin": s.label}); err == nil || err.Error() != want {
+			t.Errorf("%v, and should be refused with\n%s", err, want)
+		}
+	}
+}

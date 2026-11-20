@@ -168,3 +168,63 @@ func TestRefused(t *testing.T) {
 		}
 	}
 }
+
+// A boolean is read as Traefik reads a label's: strconv.ParseBool. Each spelling is tried as a field's value and
+// as the bare true of an entry (G5), from a label's text and from a cluster's value.
+func TestBooleans(t *testing.T) {
+	type row struct {
+		written any
+		refused bool
+		value   bool
+	}
+	var rows []row
+	for _, s := range []string{"1", "t", "T", "true", "True", "TRUE"} {
+		rows = append(rows, row{written: s, value: true})
+	}
+	for _, s := range []string{"0", "f", "F", "false", "False", "FALSE"} {
+		rows = append(rows, row{written: s, value: false})
+	}
+	for _, s := range []string{"yes", "on", "tRuE", "fALSE", "2", ""} {
+		rows = append(rows, row{written: s, refused: true})
+	}
+	// A cluster's boolean is read as it is, and its number as the text a label would have had.
+	rows = append(rows,
+		row{written: true, value: true}, row{written: false, value: false},
+		row{written: 1, value: true}, row{written: 0, value: false},
+		row{written: int64(1), value: true}, row{written: float64(0), value: false},
+		row{written: 2, refused: true}, row{written: float64(0.5), refused: true},
+	)
+	for _, r := range rows {
+		e, err := Read(pluginType, map[string]any{"Servers.a.Enabled": r.written})
+		switch {
+		case r.refused:
+			want := fmt.Sprintf(`Servers.a.Enabled: "%v" is neither true nor false`, r.written)
+			if err == nil || err.Error() != want {
+				t.Errorf("the field written %#v: %v, and should be refused with\n%s", r.written, err, want)
+			}
+		case err != nil:
+			t.Errorf("the field written %#v is refused: %v", r.written, err)
+		default:
+			if got := e.Entries("Servers")[0].Bool("Enabled"); got != r.value {
+				t.Errorf("the field written %#v is %v", r.written, got)
+			}
+		}
+
+		// An entry is there by a true alone: a false is no entry, and is refused as anything else is.
+		e, err = Read(pluginType, map[string]any{"Servers.a.Tags.blue": r.written})
+		if r.refused || !r.value {
+			want := fmt.Sprintf(`Servers.a.Tags.blue: "%v" is neither true nor fields (a tag has name, color)`, r.written)
+			if err == nil || err.Error() != want {
+				t.Errorf("the entry written %#v: %v, and should be refused with\n%s", r.written, err, want)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("the entry written %#v is refused: %v", r.written, err)
+			continue
+		}
+		if tags := e.Entries("Servers")[0].Entries("Tags"); len(tags) != 1 || tags[0].Name != "blue" {
+			t.Errorf("the entry written %#v is not the entry with its defaults", r.written)
+		}
+	}
+}
