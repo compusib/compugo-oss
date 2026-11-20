@@ -1,0 +1,6 @@
+// One Go module per library (libs/<name>) and per program (apps/<name>), each listed here.
+// A new one: `go mod init github.com/compusib/compugo-oss/<libs|apps>/<name>` in its directory, then
+// `go work use ./<libs|apps>/<name>` here. Its release is the git tag `<libs|apps>/<name>/v<version>`.
+go 1.27
+
+use ./libs/traefik

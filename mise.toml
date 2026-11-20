@@ -1,0 +1,6 @@
+# Go and Yaegi as Traefik is built with them: a Traefik plugin runs interpreted, under Yaegi, so what is written
+# here is tested with that pair. Today that is Traefik v3.7.18. The workflows install both from this file.
+[tools]
+go = "1.27"
+# The release's own binary: it answers `yaegi version` with its version, which one built by `go install` does not.
+"github:traefik/yaegi" = "0.16.3"
