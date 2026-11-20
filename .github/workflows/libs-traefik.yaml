@@ -1,0 +1,37 @@
+name: libs/traefik
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - main
+    tags:
+      - libs/traefik/v*
+    paths:
+      - libs/traefik/**
+      - mise.toml
+      - go.work
+      - .github/workflows/libs-traefik.yaml
+  pull_request:
+    branches:
+      - main
+permissions:
+  contents: read
+jobs:
+  test:
+    name: vet, test, test under Yaegi
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: libs/traefik
+    steps:
+      - uses: actions/checkout@v7
+      # Go and Yaegi, in the versions mise.toml pins: those Traefik is built with.
+      - uses: jdx/mise-action@v5
+      - name: versions
+        run: go version && yaegi version
+      - name: vet
+        run: go vet ./...
+      - name: test
+        run: go test -cover ./...
+      - name: test under yaegi
+        run: ./yaegi-test.sh
