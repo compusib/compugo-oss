@@ -190,11 +190,17 @@ func Normalize(raw map[string]any) (*Settings, error) {
 
 	// The groups are those Groups defines and those a rule names. A group that writes no Scopes has the default
 	// ones.
+	defaults, err := scopesOf(top, keyGroupDefaultScopes)
+	if err != nil {
+		return nil, err
+	}
 	groups := map[string]*group{}
 	for _, e := range top.Entries(keyGroups) {
-		g := &group{own: scopesOf(top, keyGroupDefaultScopes)}
+		g := &group{own: defaults}
 		if e.Written(keyScopes) {
-			g.own = scopesOf(e, keyScopes)
+			if g.own, err = scopesOf(e, keyScopes); err != nil {
+				return nil, err
+			}
 		}
 		if g.request, err = request(e, keyRequestAllScopesForAnyMember); err != nil {
 			return nil, err
@@ -203,7 +209,7 @@ func Normalize(raw map[string]any) (*Settings, error) {
 	}
 	define := func(name string) {
 		if groups[name] == nil {
-			groups[name] = &group{own: scopesOf(top, keyGroupDefaultScopes), request: optional}
+			groups[name] = &group{own: defaults, request: optional}
 		}
 	}
 	for _, e := range entries {
@@ -270,16 +276,26 @@ type member struct {
 }
 
 // scopesOf is the scopes of a setting that has them as required and optional: each scope's name, and whether it
-// is required. A scope written as both is required.
-func scopesOf(e *settings.Entry, field string) map[string]bool {
+// is required. A scope is one or the other: written as both in the same setting, it is refused. (Across settings
+// it may be both, a rule's and its group's: the two stages say what it is then.)
+func scopesOf(e *settings.Entry, field string) (map[string]bool, error) {
 	scopes := map[string]bool{}
-	for _, s := range e.Member(field, optional) {
-		scopes[s.Text(keyName)] = false
-	}
 	for _, s := range e.Member(field, required) {
 		scopes[s.Text(keyName)] = true
 	}
-	return scopes
+	var both []string
+	for _, s := range e.Member(field, optional) {
+		name := s.Text(keyName)
+		if scopes[name] {
+			both = append(both, name)
+		}
+		scopes[name] = false
+	}
+	if len(both) > 0 {
+		sort.Strings(both)
+		return nil, settings.Errorf(settings.Join(e.Path, field), "%q is both %s and %s", both[0], required, optional)
+	}
+	return scopes, nil
 }
 
 // request reads one of the two settings that say how scopes are asked for: false, true, required or optional. Its
@@ -344,8 +360,11 @@ func read(e *settings.Entry) (*member, error) {
 		}
 	}
 
-	m := &member{rule: r, own: scopesOf(e, keyScopes)}
+	m := &member{rule: r}
 	var err error
+	if m.own, err = scopesOf(e, keyScopes); err != nil {
+		return nil, err
+	}
 	if m.request, err = request(e, keyRequestOtherGroupScopes); err != nil {
 		return nil, err
 	}
