@@ -867,8 +867,12 @@ func TestSettledHere(t *testing.T) {
 			`Rules.page: a rule names its Group where there are several groups (staff, users)`},
 		{"the two settings read true and false as a boolean is read",
 			obj{"Scopes": "x", "RequestOtherGroupScopes": "0", openid: "openid"}, one(`["x"]`, `[]`)},
-		{"and required and optional in lower case alone", obj{"Scopes": "x", "RequestOtherGroupScopes": "Required"},
-			`RequestOtherGroupScopes: "Required" is none of false, true, required, optional`},
+		{"and required and optional in any case: a rule's", obj{"Scopes": "x", "RequestOtherGroupScopes": "OPTIONAL", openid: "openid"},
+			one(`["x"]`, `["openid"]`)},
+		{"in any case: a group's", obj{"Scopes": "x", "Groups.default.RequestAllScopesForAnyMember": "Required", openid: "openid"},
+			one(`["openid","x"]`, `[]`)},
+		{"another word is refused as it is written", obj{"Scopes": "x", "RequestOtherGroupScopes": "Maybe"},
+			`RequestOtherGroupScopes: "Maybe" is none of false, true, required, optional`},
 		{"a check's name begins with a letter", obj{"ClaimChecks": "_x"},
 			`ClaimChecks: "_x" is no name of a check (letters, digits and _, beginning with a letter)`},
 		{"a check's name has letters, digits and _", obj{"Scopes": "x", "ClaimChecks": "Rule_2,b", openid: "openid"},
@@ -888,9 +892,9 @@ func TestCase(t *testing.T) {
 		"rules.page.scopes.REQUIRED":                  "admin.cluster",
 		"rules.page.scopes.Optional":                  "auditor",
 		"rules.page.missing.Login":                    "TRUE",
-		"rules.page.requestothergroupscopes":          "optional",
+		"rules.page.requestothergroupscopes":          "Optional",
 		"rules.page.additionalchecks":                 "weekdays",
-		"groups.default.requestallscopesforanymember": "false",
+		"groups.default.requestallscopesforanymember": "FALSE",
 	}))
 	if err != nil {
 		t.Fatal(err)
