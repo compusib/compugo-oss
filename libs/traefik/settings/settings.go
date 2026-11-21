@@ -17,8 +17,7 @@
 //   - G5: a bare true is the entry with its defaults; fields refine it.
 //   - G6: what has one candidate need not be named. This is the plugin's to apply, not this package's.
 //   - G7: a dot nests, everywhere, so a key has no dot: "Scopes.required: x" and "Scopes: {required: x}" are the
-//     same. A
-//     name with a dot is written as a value, or as an entry's field.
+//     same. A name with a dot is written as a value, or as an entry's field.
 //   - G8: keys are read without regard to case; values are text, read as what the setting expects ("true", "10").
 //     A boolean is read as Traefik reads a label's, which is strconv.ParseBool: 1, t, T, true, True, TRUE and
 //     0, f, F, false, False, FALSE.
