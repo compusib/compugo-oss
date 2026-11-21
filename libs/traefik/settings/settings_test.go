@@ -228,3 +228,96 @@ func TestBooleans(t *testing.T) {
 		}
 	}
 }
+
+// Entries with members: a host's ports are open or closed, and a port written without either is open.
+var (
+	portType = &Type{What: "a port", Key: "name", Fields: []Field{{Name: "name", Kind: Text}}}
+	hostType = &Type{What: "a host", Fields: []Field{
+		{Name: "Ports", Kind: Entries, Delimiter: " ", Of: portType, Members: []string{"open", "closed"}},
+		{Name: "Spare", Kind: Entries, Delimiter: " ", Of: portType, Members: []string{"open", "closed"},
+			Default: map[string]any{"open": "http", "closed": "smtp imap"}},
+	}}
+)
+
+func TestMembers(t *testing.T) {
+	names := func(e *Entry, field, member string) string {
+		var names []string
+		for _, p := range e.Member(field, member) {
+			names = append(names, p.Text("name"))
+		}
+		return strings.Join(names, " ")
+	}
+	for name, c := range map[string]struct {
+		ports        any
+		open, closed string
+	}{
+		"without a member, the first":  {"http https", "http https", ""},
+		"a list without a member":      {[]any{"http", map[string]any{"name": "https"}}, "http https", ""},
+		"keys without a member":        {map[string]any{"http": true, "web": map[string]any{"name": "https"}}, "http https", ""},
+		"indexes without a member":     {map[string]any{"0": "http", "1": "https"}, "http https", ""},
+		"both members":                 {map[string]any{"open": "http", "closed": []any{"smtp", "imap"}}, "http", "smtp imap"},
+		"one member":                   {map[string]any{"closed": map[string]any{"smtp": true}}, "", "smtp"},
+		"a member in another case":     {map[string]any{"CLOSED": map[string]any{"0": map[string]any{"name": "smtp"}}}, "", "smtp"},
+		"a member's name as a value":   {"open closed", "open closed", ""},
+		"a member's name under itself": {map[string]any{"open": map[string]any{"open": true}}, "open", ""},
+		"an empty list":                {[]any{}, "", ""},
+	} {
+		e, err := Read(hostType, map[string]any{"Ports": c.ports})
+		if err != nil {
+			t.Errorf("%s: refused: %v", name, err)
+			continue
+		}
+		if open, closed := names(e, "Ports", "open"), names(e, "Ports", "closed"); open != c.open || closed != c.closed {
+			t.Errorf("%s: open %q, closed %q, and should be %q and %q", name, open, closed, c.open, c.closed)
+		}
+		if !e.Written("Ports") || e.Written("Spare") {
+			t.Errorf("%s: Ports is written and Spare is not", name)
+		}
+		if open, closed := names(e, "Spare", "open"), names(e, "Spare", "closed"); open != "http" || closed != "smtp imap" {
+			t.Errorf("%s: the default is open %q, closed %q", name, open, closed)
+		}
+	}
+	e, err := Read(hostType, map[string]any{"Ports.closed.0": "smtp", "Ports.OPEN.http": "true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if open, closed := names(e, "Ports", "open"), names(e, "Ports", "closed"); open != "http" || closed != "smtp" {
+		t.Errorf("dotted keys: open %q, closed %q", open, closed)
+	}
+
+	for want, raw := range map[string]map[string]any{
+		`Ports: open and closed cannot be mixed with other entries`:                                                {"Ports.open": "http", "Ports.smtp": true},
+		`Ports.closed: an empty value`:                                                                             {"Ports.closed": ""},
+		`Ports.closed.smtp: unknown key "tls" (a port has name); a name with a dot is a value, or an entry's name`: {"Ports.closed.smtp.tls": true},
+		`Ports.0: unknown key "open" (a port has name)`:                                                            {"Ports": []any{map[string]any{"open": "http"}}},
+	} {
+		_, err := Read(hostType, raw)
+		if err == nil || err.Error() != want {
+			t.Errorf("%v\nand should be refused with\n%s", err, want)
+		}
+	}
+	if _, err := Read(hostType, map[string]any{"Ports.open": "http", "Ports.0": "smtp"}); err == nil ||
+		err.Error() != `Ports: open and closed cannot be mixed with other entries` {
+		t.Errorf("an index beside a member: %v", err)
+	}
+}
+
+// The hint about a name with a dot is for a key that leads to a true: the rest of such a name written as a key.
+func TestHint(t *testing.T) {
+	const hint = `; a name with a dot is a value, or an entry's name`
+	for want, raw := range map[string]map[string]any{
+		`Ports.a: unknown key "b" (a port has name)` + hint: {"Ports.a.b": true},
+		`Ports.a: unknown key "b" (a port has name)`:        {"Ports.a.b": "x"},
+	} {
+		if _, err := Read(hostType, raw); err == nil || err.Error() != want {
+			t.Errorf("%v\nand should be\n%s", err, want)
+		}
+	}
+	// A name with two dots leads to a true further down; a field of something else does not.
+	if _, err := Read(hostType, map[string]any{"Ports.a.b.c": "1"}); err == nil || !strings.HasSuffix(err.Error(), hint) {
+		t.Errorf("a name with two dots: %v", err)
+	}
+	if _, err := Read(hostType, map[string]any{"Ports.a.b.c": "x"}); err == nil || strings.HasSuffix(err.Error(), hint) {
+		t.Errorf("a field of a field: %v", err)
+	}
+}
