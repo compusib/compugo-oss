@@ -299,12 +299,12 @@ func scopesOf(e *settings.Entry, field string) (map[string]bool, error) {
 }
 
 // request reads one of the two settings that say how scopes are asked for: false, true, required or optional. Its
-// true and false are read as a boolean is.
+// true and false are read as a boolean is, and required and optional in any case.
 func request(e *settings.Entry, field string) (string, error) {
 	text := e.Text(field)
-	switch text {
+	switch word := strings.ToLower(text); word {
 	case required, optional:
-		return text, nil
+		return word, nil
 	}
 	if b, err := strconv.ParseBool(text); err == nil {
 		return strconv.FormatBool(b), nil
